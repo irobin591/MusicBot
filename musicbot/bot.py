@@ -1668,6 +1668,8 @@ class MusicBot(discord.Client):
             self.autoplaylist = load_file(self.config.auto_playlist_file)
             self.config.auto_playlist = True
             return Response("Autoplaylist loaded :+1:", delete_after=20)
+        
+        await self.send_typing(channel)
 
         try:
             info = await self.downloader.extract_info(self.loop, playlist_url, download=False, process=False)
