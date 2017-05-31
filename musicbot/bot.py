@@ -464,7 +464,8 @@ class MusicBot(discord.Client):
             name = u'{}{}'.format(prefix, entry.title)[:128]
             game = discord.Game(name=name)
 
-        await self.change_status(game)
+        # await self.change_status(game)
+        await self.change_status(None)
 
 
     async def safe_send_message(self, dest, content, *, tts=False, expire_in=0, also_delete=None, quiet=False):
@@ -1654,6 +1655,58 @@ class MusicBot(discord.Client):
 
         return Response(":mailbox_with_mail:", delete_after=20)
 
+    @owner_only
+    async def cmd_autopl(self, channel, player, playlist_url):
+        playlist_url = playlist_url.strip('<>')
+
+        if playlist_url.lower() == 'disable' or playlist_url.lower() == 'stop' or playlist_url.lower() == 'clear':
+            self.autoplaylist = None
+            self.config.auto_playlist = False
+            return Response("Autoplaylist cleared :+1:", delete_after=20)
+
+        if playlist_url.lower() == 'reset' or playlist_url.lower() == 'default':
+            self.autoplaylist = load_file(self.config.auto_playlist_file)
+            self.config.auto_playlist = True
+            return Response("Autoplaylist loaded :+1:", delete_after=20)
+
+        try:
+            info = await self.downloader.extract_info(self.loop, playlist_url, download=False, process=False)
+        except Exception as e:
+            raise exceptions.CommandError("Could not extract info from input url\n%s\n" % e, expire_in=25)
+
+        if not info:
+            raise exceptions.CommandError("Could not extract info from input url, no data.", expire_in=25)
+        
+        if not info.get('entries', None):
+            if info.get('url', None) != info.get('webpage_url', info.get('url', None)):
+                raise exceptions.CommandError("This does not seem to be a playlist.", expire_in=25)
+            else:
+                return await self.cmd_pldump(channel, info.get(''))
+        
+        linegens = defaultdict(lambda: None, **{
+            "youtube":    lambda d: 'https://www.youtube.com/watch?v=%s' % d['id'],
+            "soundcloud": lambda d: d['url'],
+            "bandcamp":   lambda d: d['url']
+        })
+
+        exfunc = linegens[info['extractor'].split(':')[0]]
+
+        if not exfunc:
+            raise exceptions.CommandError("Could not extract info from input url, unsupported playlist type.", expire_in=25)
+
+        self.autoplaylist = list(map(exfunc, info['entries']))
+
+        self.config.auto_playlist = True
+
+        # Start Player if stopped
+        if player.is_stopped:
+            player.play()
+
+        if self.config.auto_playlist:
+            await self.on_player_finished_playing(player)
+
+        return Response("Autoplaylist changed :+1:", delete_after=20)
+
     async def cmd_listids(self, server, author, leftover_args, cat='all'):
         """
         Usage:
@@ -1811,6 +1864,12 @@ class MusicBot(discord.Client):
         await self.safe_send_message(channel, ":wave:")
         await self.disconnect_all_voice_clients()
         raise exceptions.TerminateSignal
+
+    @owner_only
+    async def cmd_debug(self, channel):
+        await self.send_typing(channel)
+
+        await self.safe_send_message(channel, "Enabled: {}\nAutoplaylist[1 el]: {}".format(self.config.auto_playlist, self.autoplaylist[:1]), expire_in=30)
 
     async def on_message(self, message):
         await self.wait_until_ready()
